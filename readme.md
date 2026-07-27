@@ -50,6 +50,7 @@ Create a `config.json` file in the root directory (use the provided `config.exam
 - **maxLagTime**: Maximum allowed time lag before marking the node as unhealthy.
 - **metricsPort**: Port to expose Prometheus metrics.
 - **healthCheckPort**: Port for the health check endpoint.
+- **requestTimeout** (optional): RPC request timeout in ms, defaults to 10000. Currently applied to `solana` checks only.
 - **healthCheckPath** (optional): Path for the health check endpoint. Defaults to `/` (root). The legacy path `/health` is also supported when using the default.
 
 ### Node Type Notes

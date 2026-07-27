@@ -194,19 +194,56 @@ async function checkAptosNodeStatus(config) {
   }
 }
 
+// A Solana slot may be skipped, in which case no block exists on it. Look back
+// at most this many slots to find the most recent slot that actually has a block.
+const SOLANA_BLOCK_SEARCH_RANGE = 50;
+
 async function solanaRpc(config, method, params = []) {
-  const response = await axios.post(config.rpcUrl, {
-    jsonrpc: '2.0',
-    method,
-    params,
-    id: 1,
-  });
+  const response = await axios.post(
+    config.rpcUrl,
+    {
+      jsonrpc: '2.0',
+      method,
+      params,
+      id: 1,
+    },
+    { timeout: config.requestTimeout || 10000 }
+  );
 
   if (response.data.error) {
     throw new Error(response.data.error.message || JSON.stringify(response.data.error));
   }
 
   return response.data.result;
+}
+
+// Returns the block time of the latest slot that carries a block, or null.
+async function getSolanaLatestBlockTime(config, latestSlot) {
+  try {
+    const blockTime = await solanaRpc(config, 'getBlockTime', [latestSlot]);
+    if (blockTime !== null && blockTime !== undefined) {
+      return blockTime;
+    }
+  } catch (error) {
+    // Skipped slots make getBlockTime fail; fall through to the lookback below.
+    logger.warn(`Block time unavailable for slot ${latestSlot}: ${error.message}`);
+  }
+
+  const startSlot = Math.max(latestSlot - SOLANA_BLOCK_SEARCH_RANGE, 0);
+  const slots = await solanaRpc(config, 'getBlocks', [
+    startSlot,
+    latestSlot,
+    { commitment: 'confirmed' },
+  ]);
+
+  if (!Array.isArray(slots) || slots.length === 0) {
+    return null;
+  }
+
+  const lastSlotWithBlock = slots[slots.length - 1];
+  logger.info(`Falling back to slot ${lastSlotWithBlock} for block time`);
+  const blockTime = await solanaRpc(config, 'getBlockTime', [lastSlotWithBlock]);
+  return blockTime === undefined ? null : blockTime;
 }
 
 async function checkSolanaNodeStatus(config) {
@@ -222,8 +259,8 @@ async function checkSolanaNodeStatus(config) {
     }
     metrics.finalizedHeight.set(finalizedHeight);
 
-    const blockTime = await solanaRpc(config, 'getBlockTime', [latestHeight]);
-    if (blockTime === null || blockTime === undefined) {
+    const blockTime = await getSolanaLatestBlockTime(config, latestHeight);
+    if (blockTime === null) {
       logger.warn('Latest slot block time is unavailable');
       metrics.status.set(0);
       return false;
